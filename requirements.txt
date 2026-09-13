@@ -1,0 +1,18 @@
+# Argus Shell - Runtime Dependencies
+#
+# Argus has NO external dependencies beyond the Python standard library.
+# This file is included for documentation purposes and compatibility
+# with dependency management tools.
+#
+# Python 3.8+ standard library provides everything needed:
+# - os, sys, signal: process and system management
+# - sqlite3: audit database
+# - readline: command history and line editing (Unix/Linux/macOS only)
+# - re, json, shlex, time, datetime: text/data processing
+#
+# To install Argus:
+#
+#   pip install .              # Install from repository
+#   pip install -e .           # Install in editable/development mode
+#   pip install argus-shell    # Install from PyPI (when published)
+#

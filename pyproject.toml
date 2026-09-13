@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "argus-shell"
+version = "1.0.0"
+description = "A security-focused Unix shell with audit logging, risk scoring, and suspicious activity detection"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Argus Team"}
+]
+keywords = ["shell", "security", "audit", "risk-scoring", "unix"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: BSD",
+    "Environment :: Console",
+    "Topic :: System :: Shells",
+    "Topic :: Security",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=6.0", "pytest-cov>=2.10"]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/argus"
+Repository = "https://github.com/yourusername/argus.git"
+Documentation = "https://github.com/yourusername/argus#readme"
+
+[project.scripts]
+argus = "argus.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["argus*"]
+
+[tool.setuptools.package-data]
+argus = ["py.typed"]
