@@ -1,24 +1,24 @@
 # Deployment Checklist
 
 ##  Project Structure
-- [x] Modular Python package (`argus/`) with 14 focused modules
-- [x] Entry point script (`argus_shell.py`)
-- [x] Clean root-level organization
-- [x] No monolithic files
+-  Modular Python package (`argus/`) with 14 focused modules
+-  Entry point script (`argus_shell.py`)
+-  Clean root-level organization
+-  No monolithic files
 
 ##  Packaging & Distribution
-- [x] `setup.py` — Traditional setuptools configuration
-- [x] `pyproject.toml` — Modern PEP 518 build configuration
-- [x] `requirements.txt` — Dependency documentation
-- [x] `setup.py` includes entry point: `argus = argus.main:main`
-- [x] Package name: `argus-shell`
+-  `setup.py` — Traditional setuptools configuration
+-  `pyproject.toml` — Modern PEP 518 build configuration
+-  `requirements.txt` — Dependency documentation
+-  `setup.py` includes entry point: `argus = argus.main:main`
+-  Package name: `argus-shell`
 
 ##  Cross-Platform Improvements
-- [x] Optional readline handling (graceful degradation on Windows)
-- [x] Platform detection for Unix-only functions
-- [x] Proper error handling for missing Unix-specific features
-- [x] Package imports successfully on Windows (with limited functionality)
-- [x] Clear documentation about platform requirements
+-  Optional readline handling (graceful degradation on Windows)
+-  Platform detection for Unix-only functions
+-  Proper error handling for missing Unix-specific features
+-  Package imports successfully on Windows (with limited functionality)
+-  Clear documentation about platform requirements
 
 ### Platform-Specific Fixes Applied:
 1. **readline** — Made optional in `main.py` and `builtins.py`
@@ -30,18 +30,18 @@
 7. **os.setpgid()** — Protected in Unix-only code paths
 
 ##  Documentation
-- [x] `README.md` — Updated with new installation methods
-- [x] `ARCHITECTURE.md` — Complete module documentation
-- [x] Deployment & Packaging section in README
-- [x] Platform requirements clearly stated
-- [x] Installation options documented (pip install, direct run, system-wide)
+-  `README.md` — Updated with new installation methods
+-  `ARCHITECTURE.md` — Complete module documentation
+-  Deployment & Packaging section in README
+-  Platform requirements clearly stated
+-  Installation options documented (pip install, direct run, system-wide)
 
 ##  Code Quality
-- [x] All modules import successfully
-- [x] No syntax errors
-- [x] No missing dependencies (stdlib only)
-- [x] Consistent relative imports
-- [x] Graceful error handling for platform differences
+-  All modules import successfully
+-  No syntax errors
+-  No missing dependencies (stdlib only)
+-  Consistent relative imports
+-  Graceful error handling for platform differences
 
 ## Installation Methods Enabled
 
