@@ -27,7 +27,7 @@ def main() -> int:
         print("SKIP legacy POSIX process-group/PTY fixtures on native Windows; running portable integrity/protocol regressions.")
         with tempfile.TemporaryDirectory(prefix="argus-regressions-") as temporary:
             env = private_environment(Path(temporary))
-            for pattern in ("test_integrity.py", "test_broker.py"):
+            for pattern in ("test_winsecurity.py", "test_integrity.py", "test_broker.py"):
                 result = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern, "-v"],
                                         cwd=ROOT, env=env, check=False)
                 if result.returncode:

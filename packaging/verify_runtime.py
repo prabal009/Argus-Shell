@@ -136,6 +136,11 @@ class RuntimeTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "POSIX PTY/session APIs unavailable on native Windows; ConPTY requires separate target verification")
     def test_interactive_posix_pty(self):
+        for expected_status in (0, 7):
+            with self.subTest(exit_status=expected_status):
+                self.interactive_posix_pty(expected_status)
+
+    def interactive_posix_pty(self, expected_status: int):
         import pty
         import select
         import struct
@@ -157,39 +162,62 @@ class RuntimeTests(unittest.TestCase):
             fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 100, 0, 0))
             chunks = bytearray()
             screen = harness["TerminalScreen"](lambda data: os.write(master, data), rows=24, columns=100)
-            deadline = time.monotonic() + 20
-            sent = False
-            while time.monotonic() < deadline:
-                if select.select([master], [], [], .1)[0]:
+            terminal_open = True
+
+            def diagnostics():
+                return f"Rendered terminal:\n{screen.text}\nRaw PTY output:\n{bytes(chunks)!r}"
+
+            def read_output(timeout):
+                if select.select([master], [], [], timeout)[0]:
                     try:
                         data = os.read(master, 65536)
                     except OSError as error:
                         if error.errno == errno.EIO:
-                            break
+                            return False
                         raise
                     if not data:
-                        break
+                        return False
                     chunks.extend(data)
                     screen.feed(data)
-                    if not sent and screen.at_prompt:
-                        # Marker is not contiguous in echoed input, avoiding a false pass.
-                        command = python_command("print('PTY' + '-OK')")
-                        os.write(master, (command + "\n").encode())
-                        sent = True
-                    if sent and "PTY-OK" in screen.text and screen.at_prompt:
-                        os.write(master, b"exit\n")
-                        break
-            self.assertIn("PTY-OK", screen.text, bytes(chunks).decode(errors="replace"))
-            self.assertNotIn("terminal does not support cursor position requests", screen.text.lower())
+                return True
+
+            deadline = time.monotonic() + 20
+            command_newlines = None
+            exit_sent = False
+            while time.monotonic() < deadline:
+                terminal_open = read_output(.1)
+                if not terminal_open:
+                    break
+                if command_newlines is None and screen.at_prompt:
+                    # Marker is not contiguous in echoed input, avoiding a false pass.
+                    command = python_command(f"print('PTY' + '-OK'); raise SystemExit({expected_status})")
+                    command_newlines = screen.newlines
+                    os.write(master, (command + "\r").encode())
+                elif (command_newlines is not None and screen.newlines > command_newlines
+                      and "PTY-OK" in screen.text.splitlines() and screen.at_prompt):
+                    os.write(master, b"exit\r")
+                    exit_sent = True
+                    break
+            self.assertIn("PTY-OK", screen.text.splitlines(), diagnostics())
+            self.assertTrue(exit_sent, "command did not return to the prompt\n" + diagnostics())
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline:
+                # Keep acting as a terminal through exit: final redraws can
+                # request CPR, and TCSADRAIN while restoring shell modes can
+                # wait for the PTY master to consume pending output on macOS.
+                if terminal_open:
+                    terminal_open = read_output(.05)
+                else:
+                    time.sleep(.05)
                 waited, status = os.waitpid(pid, os.WNOHANG)
                 if waited:
                     reaped = True
-                    self.assertEqual(os.waitstatus_to_exitcode(status), 0)
+                    self.assertEqual(os.waitstatus_to_exitcode(status), expected_status, diagnostics())
                     break
-                time.sleep(.05)
-            self.assertTrue(reaped, "interactive exit did not terminate")
+            self.assertTrue(reaped, "interactive exit did not terminate\n" + diagnostics())
+            self.assertGreater(screen.cpr_requests, 0, diagnostics())
+            self.assertNotIn("terminal does not support cursor position requests",
+                             screen.text.lower(), diagnostics())
         finally:
             if not reaped:
                 try:

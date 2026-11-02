@@ -4,12 +4,31 @@ import os
 import stat
 import sys
 import tempfile
+import secrets
+import shutil
 from contextlib import contextmanager
 
 
-def _windows_private(path):
+def _windows_private(path, *, fd=None):
     from .winsecurity import secure_path
-    secure_path(path)
+    secure_path(path, fd=fd)
+
+
+def _windows_makedirs(path):
+    from .winsecurity import create_directory
+    try:
+        create_directory(path)
+    except FileNotFoundError:
+        parent = os.path.dirname(os.path.abspath(path))
+        if parent == os.path.abspath(path):
+            raise
+        _windows_makedirs(parent)
+        try:
+            create_directory(path)
+        except FileExistsError:
+            pass
+    except FileExistsError:
+        pass
 
 
 def _safe(value):
@@ -21,9 +40,14 @@ def storage_warning(operation, error):
 
 
 def private_directory(path):
-    os.makedirs(path, mode=0o700, exist_ok=True)
+    if os.name == 'nt':
+        _windows_makedirs(path)
+    else:
+        os.makedirs(path, mode=0o700, exist_ok=True)
     info = os.lstat(path)
     if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+        raise PermissionError(f'unsafe storage directory: {path}')
+    if getattr(info, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
         raise PermissionError(f'unsafe storage directory: {path}')
     if os.name == 'nt':
         _windows_private(path)
@@ -39,22 +63,58 @@ def open_private(path, flags=os.O_RDWR | os.O_CREAT):
         existing = None
     if existing is not None and (not stat.S_ISREG(existing.st_mode) or existing.st_nlink != 1):
         raise PermissionError(f'unsafe storage file: {path}')
+    if os.name == 'nt':
+        from .winsecurity import open_private_file
+        return open_private_file(path, flags)
     extra = getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_CLOEXEC', 0) | getattr(os, 'O_NONBLOCK', 0)
     fd = os.open(path, flags | extra | getattr(os, 'O_BINARY', 0), 0o600)
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise PermissionError(f'unsafe storage file: {path}')
-        if os.name == 'nt':
-            _windows_private(path)
-        else:
-            if info.st_uid != os.getuid():
-                raise PermissionError(f'foreign-owned storage file: {path}')
-            os.fchmod(fd, 0o600)
+        if info.st_uid != os.getuid():
+            raise PermissionError(f'foreign-owned storage file: {path}')
+        os.fchmod(fd, 0o600)
         return fd
     except BaseException:
         os.close(fd)
         raise
+
+
+def _private_temporary_file(directory):
+    if os.name != 'nt':
+        return tempfile.mkstemp(prefix='.argus-', dir=directory)
+    for _ in range(100):
+        path = os.path.join(directory, '.argus-' + secrets.token_hex(16))
+        try:
+            return open_private(path, os.O_RDWR | os.O_CREAT | os.O_EXCL), path
+        except FileExistsError:
+            continue
+    raise FileExistsError('could not allocate a unique private temporary file')
+
+
+@contextmanager
+def private_temporary_directory(*, prefix='argus-'):
+    """Create private worker storage without relying on the token default owner."""
+    if os.name != 'nt':
+        with tempfile.TemporaryDirectory(prefix=prefix) as directory:
+            yield directory
+        return
+    from .winsecurity import create_directory
+    for _ in range(100):
+        directory = os.path.join(tempfile.gettempdir(), prefix + secrets.token_hex(16))
+        try:
+            create_directory(directory)
+            break
+        except FileExistsError:
+            continue
+    else:
+        raise FileExistsError('could not allocate a unique private temporary directory')
+    try:
+        private_directory(directory)
+        yield directory
+    finally:
+        shutil.rmtree(directory)
 
 
 def atomic_write(path, text, *, private_parent=True):
@@ -65,16 +125,18 @@ def atomic_write(path, text, *, private_parent=True):
         info = os.lstat(directory)
         if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
             raise PermissionError(f'unsafe parent directory: {directory}')
+        if getattr(info, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+            raise PermissionError(f'unsafe parent directory: {directory}')
         if os.name == 'posix' and (info.st_uid != os.getuid() or info.st_mode & 0o022):
             raise PermissionError(f'unsafe parent directory: {directory}')
     if os.path.lexists(path):
         fd = open_private(path, os.O_RDONLY)
         os.close(fd)
-    fd, temporary = tempfile.mkstemp(prefix='.argus-', dir=directory)
+    fd, temporary = _private_temporary_file(directory)
     try:
         with os.fdopen(fd, 'w', encoding='utf-8') as handle:
             if os.name == 'nt':
-                _windows_private(temporary)
+                _windows_private(temporary, fd=handle.fileno())
             else:
                 os.fchmod(handle.fileno(), 0o600)
             handle.write(text)

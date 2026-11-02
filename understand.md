@@ -240,14 +240,18 @@ The original B01–B29 remain invariants: parsed every-stage authorization, auth
 
 New language support replaces old tests that merely expected features to be unsupported; it does not waive consumer-visible security/lifecycle regressions. New tests cover grammar families, scope/expansion, real CLI/process workers, policy/report/vault operations, settings/migration, history/editor, signature/collector/protocol and protected-control validation.
 
+Cross-platform CI exposed additional portability defects. Windows private directories, files, worker payloads, and atomic replacements now receive the current user's SID owner and protected ACL at creation, rather than depending on an elevated token's default owner. Existing foreign-owned paths, reparse points and hardlinks remain rejected; descriptor checks validate the opened object before truncation. Native Windows regressions check these boundaries.
+
+The interactive package smoke continues servicing PTY output and cursor reports during shutdown, including while terminal restoration drains pending output. It checks successful and nonzero interactive exit statuses and reports terminal diagnostics on failure; it does not skip the macOS PTY test or relax its deadline.
+
 ## 7. Verification and still-left work
 
 The results below were exercised on Linux. An implementation or workflow existing in the repository is not a claim of successful execution on every target.
 
 Recorded Linux verification for this implementation:
 
-- The final integrated run executed **228 tests: 225 passed, 3 platform-specific cases skipped**, with resource warnings treated as errors.
-- The installed application's eight runtime scenarios passed, including actual PTY input, workers, pipelines, scripts/source, exported-variable boundaries and exit status.
+- The final integrated local run executed **234 tests: 225 passed, 9 platform-specific cases skipped**, with resource warnings treated as errors. Native Windows/macOS results must be checked on their actual CI runners.
+- The installed application's eight runtime scenarios passed, including actual PTY input with exit statuses 0 and 7, workers, pipelines, scripts/source, exported-variable boundaries and exit status.
 - Fresh virtual environments independently installed the wheel and source distribution; each passed the same eight runtime scenarios from outside the checkout.
 - Both PyInstaller **onefile** and **onedir** Linux builds completed, and each executable passed all eight runtime scenarios, including its internal frozen-worker path.
 - A direct application smoke exercised functions/local scope, brace expansion, loops, here-strings, command substitution, pipelines, subshell `exec` isolation and EXIT traps.

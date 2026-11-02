@@ -21,7 +21,7 @@ import time
 
 from . import jobs
 from .utils import safe_text, redact_text, secret_values
-from .storage import open_private, private_directory
+from .storage import open_private, private_temporary_directory
 
 _worker_group = None
 
@@ -427,8 +427,7 @@ def execute_pipeline(commands, background, runtime, *, audit_id=None, started=No
         _flush_streams()
         if os.name == 'nt':
             controller = WindowsJob(security_policy.get('resource_limits', {}))
-        with tempfile.TemporaryDirectory(prefix='argus-worker-') as directory:
-            private_directory(directory)
+        with private_temporary_directory(prefix='argus-worker-') as directory:
             for _ in range(len(commands) - 1):
                 pipes.append(os.pipe())
             for index, command in enumerate(commands):
