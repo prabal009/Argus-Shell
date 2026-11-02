@@ -459,7 +459,7 @@ def execute_pipeline(commands, background, runtime, *, audit_id=None, started=No
                     'builtin': not command.argv or main.is_builtin(command.argv, runtime),
                     'bypass_functions': bool(getattr(runtime, 'bypass_functions', False)),
                     'exec_requested': bool(getattr(runtime, 'exec_requested', False)),
-                    'control': {'port': listener.getsockname()[1], 'token': token + ':' + str(index)},
+                    'control': {'port': listener.getsockname()[1], 'token': token},
                 }
                 with os.fdopen(open_private(payload_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL),
                                'w', encoding='utf-8') as stream:
@@ -486,23 +486,19 @@ def execute_pipeline(commands, background, runtime, *, audit_id=None, started=No
                 for fd in pair:
                     os.close(fd)
             pipes.clear()
-            ready_tokens = set()
-            expected_tokens = {token + ':' + str(index) for index in range(len(children))}
-            while len(ready_tokens) < len(children):
+            ready_pids = set()
+            while len(ready_pids) < len(children):
                 connection, _ = listener.accept()
                 connections.append(connection)
                 connection.settimeout(30)
                 ready = _read_ready(connection)
-                # Identity is the per-worker secret token, not the PID: on Windows a
-                # venv launcher may interpose a process so the reporting PID differs
-                # from the Popen handle's PID.
-                if ready.get('token') not in expected_tokens:
+                if ready.get('token') != token or ready.get('pid') not in {child.pid for child in children}:
                     raise OSError('invalid worker initialization identity')
-                if ready['token'] in ready_tokens:
+                if ready['pid'] in ready_pids:
                     raise OSError('duplicate worker initialization')
                 if not ready.get('ok'):
                     raise OSError(ready.get('error', 'worker initialization failed'))
-                ready_tokens.add(ready['token'])
+                ready_pids.add(ready['pid'])
             description = ' | '.join(command.source or shlex.join(command.argv) for command in commands)
             hook = getattr(runtime, 'drain_traps', None)
             job_id = jobs.create_job(pgid, [child.pid for child in children], description,
