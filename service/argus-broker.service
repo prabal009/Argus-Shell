@@ -1,0 +1,31 @@
+[Unit]
+Description=Argus administrator-owned protected execution broker
+Requires=argus-broker.socket
+After=argus-broker.socket
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=@PYTHON@ -I -m argus.broker --policy /etc/argus/broker.json
+Sockets=argus-broker.socket
+Delegate=cpu memory pids
+TasksMax=infinity
+KillMode=control-group
+TimeoutStopSec=15
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/argus-broker /sys/fs/cgroup @WORKDIR@
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=no
+PrivateTmp=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically forward protected Argus audit records
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=30s
+RandomizedDelaySec=5s
+Unit=argus-forward.service
+
+[Install]
+WantedBy=timers.target

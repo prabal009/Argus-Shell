@@ -4,34 +4,56 @@ Database operations for Argus command audit and suspicious event tracking.
 
 import os
 import sqlite3
-from .colors import BRIGHT_RED, RESET
-from .config import ARGUS_DATA_DIR, ARGUS_DATABASE
+from .config import ARGUS_DATA_DIR, ARGUS_DATABASE, get_settings
+from .storage import private_directory, open_private, storage_warning
 
 
 def initialize_argus_data_directory():
-    """Create the Argus data directory if it doesn't exist."""
-    try:
-        os.makedirs(ARGUS_DATA_DIR, mode=0o700, exist_ok=True)
-    except OSError as error:
-        print(
-            f"{BRIGHT_RED}"
-            f"Argus: could not create data directory: {error}"
-            f"{RESET}"
-        )
+    """Reject unsafe pre-existing storage rather than trusting its permissions."""
+    private_directory(ARGUS_DATA_DIR)
 
 
 def get_database_connection():
-    """Get a database connection with row factory enabled."""
-    connection = sqlite3.connect(ARGUS_DATABASE)
-    connection.row_factory = sqlite3.Row
-    return connection
+    """Open private local storage with bounded lock waiting."""
+    try:
+        initialize_argus_data_directory()
+        fd = open_private(ARGUS_DATABASE)
+        os.close(fd)
+        connection = sqlite3.connect(ARGUS_DATABASE, timeout=0.25)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return connection
+    except OSError as error:
+        raise sqlite3.OperationalError(str(error)) from error
+
+
+def prune_records(connection, table, limit=None):
+    """Apply configurable count/age retention, never deleting unfinished starts."""
+    if table not in {"command_audit", "command_events", "suspicious_events", "security_actions"}:
+        raise ValueError("unsupported retention table")
+    settings = get_settings()
+    limit = settings["retention_records"] if limit is None else limit
+    if type(limit) is not int or limit < 0:
+        raise ValueError("retention limit must be nonnegative")
+    active = "state NOT IN ('running', 'stopped')" if table == "command_audit" else "1=1"
+    if limit:
+        connection.execute(
+            f"DELETE FROM {table} WHERE id < "
+            f"(SELECT id FROM {table} WHERE {active} ORDER BY id DESC LIMIT 1 OFFSET ?)"
+            f" AND {active}", (limit - 1,),
+        )
+    days = settings["retention_days"]
+    if days:
+        connection.execute(
+            f"DELETE FROM {table} WHERE julianday(timestamp) < julianday('now', ?) AND {active}",
+            (f"-{days} days",),
+        )
 
 
 def initialize_database():
     """Initialize the database tables and indexes."""
-    initialize_argus_data_directory()
-
     try:
+        initialize_argus_data_directory()
         connection = get_database_connection()
         cursor = connection.cursor()
 
@@ -75,6 +97,27 @@ def initialize_database():
             cursor.execute(
                 "ALTER TABLE command_audit ADD COLUMN security_action TEXT"
             )
+
+        audit_columns = {
+            "state": "TEXT NOT NULL DEFAULT 'completed'",
+            "completed_at": "TEXT",
+            "session_id": "TEXT",
+            "uid": "INTEGER",
+            "euid": "INTEGER",
+            "sid": "TEXT",
+        }
+        for name, declaration in audit_columns.items():
+            if name not in existing_columns:
+                cursor.execute(f"ALTER TABLE command_audit ADD COLUMN {name} {declaration}")
+        cursor.execute(
+            """CREATE TABLE IF NOT EXISTS command_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                audit_id INTEGER NOT NULL REFERENCES command_audit(id) ON DELETE CASCADE,
+                timestamp TEXT NOT NULL,
+                state TEXT NOT NULL,
+                exit_status INTEGER
+            )"""
+        )
 
         cursor.execute(
             """
@@ -183,12 +226,13 @@ def initialize_database():
             """
         )
 
+        for table in ("command_audit", "command_events", "suspicious_events", "security_actions"):
+            prune_records(connection, table)
         connection.commit()
-        connection.close()
-
-    except sqlite3.Error as error:
-        print(
-            f"{BRIGHT_RED}"
-            f"Argus: database initialization error: {error}"
-            f"{RESET}"
-        )
+        return True
+    except (sqlite3.Error, OSError) as error:
+        storage_warning("database initialization failed", error)
+        return False
+    finally:
+        if "connection" in locals():
+            connection.close()

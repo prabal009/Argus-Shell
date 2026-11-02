@@ -1,0 +1,20 @@
+{
+  "continuation": "… ",
+  "completion.command": "command",
+  "completion.builtin": "builtin",
+  "completion.function": "function",
+  "completion.alias": "alias",
+  "completion.directory": "directory",
+  "completion.file": "file",
+  "history.private": "Private history: {state}",
+  "history.usage": "Usage: history [show|search TEXT|delete INDEX|clear|merge|private [on|off]|ignore [add|remove PATTERN]|limit [COUNT]]",
+  "on": "on",
+  "off": "off",
+  "editor.private": "Private history",
+  "editor.help": "Tab: complete · Ctrl+R: history · Alt+Enter: insert newline",
+  "startup.error": "Cannot read startup file {path}: {error}",
+  "interrupted": "Interrupted",
+  "farewell": "Goodbye!",
+  "welcome": "Argus — policy-aware shell",
+  "error": "Error: {message}"
+}

@@ -10,7 +10,7 @@ from argus.main import main
 
 if __name__ == "__main__":
     try:
-        main()
+        sys.exit(main())
     except KeyboardInterrupt:
         print()
         sys.exit(0)

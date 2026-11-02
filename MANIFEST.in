@@ -1,0 +1,6 @@
+include README.md understand.md ARCHITECTURE.md DEPLOYMENT.md License.txt requirements.txt argus_shell.py
+recursive-include argus/locales *.json
+recursive-include packaging *.py *.spec *.txt
+recursive-include service *
+recursive-include tests *.py
+recursive-exclude * __pycache__ *.py[cod]

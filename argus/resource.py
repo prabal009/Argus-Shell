@@ -1,6 +1,8 @@
-"""
-Resource limit management for child processes.
-"""
+"""Per-child resource limits; these do not provide aggregate job isolation."""
+
+import sys
+
+from .utils import safe_text
 
 try:
     import resource
@@ -9,71 +11,45 @@ except ImportError:
     HAVE_RESOURCE = False
 
 
+class ResourceLimitError(RuntimeError):
+    """A requested resource limit could not be installed; do not exec the child."""
+
+
 def apply_resource_limits(security_policy):
+    """Apply enabled positive limits or raise visibly before child execution.
+
+    Zero disables an individual limit. RLIMIT_NPROC is per real UID on Linux,
+    not per Argus job, and is applied only when explicitly positive.
     """
-    Apply resource limits to the current process.
-    
-    Note: RLIMIT_NPROC is per-user on Linux, not per-process.
-    Setting it can lock out the whole user session. It is only
-    applied when max_processes > 0 explicitly.
-    """
-    if not HAVE_RESOURCE:
-        return
-
-    limits = security_policy.get("resource_limits", {})
-
-    if not limits.get("enabled", False):
-        return
-
     try:
-        cpu_seconds = int(limits.get("cpu_seconds", 60))
-        if cpu_seconds > 0:
-            resource.setrlimit(
-                resource.RLIMIT_CPU,
-                (cpu_seconds, cpu_seconds)
-            )
-    except (ValueError, OSError):
-        pass
-
-    try:
-        memory_mb = int(limits.get("memory_mb", 512))
-        if memory_mb > 0:
-            memory_bytes = memory_mb * 1024 * 1024
-            resource.setrlimit(
-                resource.RLIMIT_AS,
-                (memory_bytes, memory_bytes)
-            )
-    except (ValueError, OSError):
-        pass
-
-    # RLIMIT_NPROC only if explicitly > 0.
-    try:
-        max_processes = int(limits.get("max_processes", 0))
-        if max_processes > 0:
-            resource.setrlimit(
-                resource.RLIMIT_NPROC,
-                (max_processes, max_processes)
-            )
-    except (ValueError, OSError, AttributeError):
-        pass
-
-    try:
-        file_size_mb = int(limits.get("file_size_mb", 100))
-        if file_size_mb > 0:
-            file_size_bytes = file_size_mb * 1024 * 1024
-            resource.setrlimit(
-                resource.RLIMIT_FSIZE,
-                (file_size_bytes, file_size_bytes)
-            )
-    except (ValueError, OSError):
-        pass
-
-    try:
-        open_files = int(limits.get("open_files", 256))
-        if open_files > 0:
-            resource.setrlimit(
-                resource.RLIMIT_NOFILE,
-                (open_files, open_files)
-            )
-    except (ValueError, OSError):
-        pass
+        limits = security_policy.get("resource_limits", {})
+        if not isinstance(limits, dict) or type(limits.get("enabled", False)) is not bool:
+            raise ResourceLimitError("resource_limits.enabled must be boolean")
+        if not limits.get("enabled", False):
+            return
+        if not HAVE_RESOURCE:
+            raise ResourceLimitError("resource limits are unavailable on this platform")
+        settings = (("cpu_seconds", "RLIMIT_CPU", 1, 60),
+                    ("memory_mb", "RLIMIT_AS", 1024 * 1024, 512),
+                    ("max_processes", "RLIMIT_NPROC", 1, 0),
+                    ("file_size_mb", "RLIMIT_FSIZE", 1024 * 1024, 100),
+                    ("open_files", "RLIMIT_NOFILE", 1, 256))
+        # Validate and discover support before changing any irreversible hard limit.
+        for key, constant, multiplier, default in settings:
+            value = limits.get(key, default)
+            if type(value) is not int or not 0 <= value <= 2**31 - 1:
+                raise ResourceLimitError(key + " must be a bounded nonnegative integer")
+            if value and not hasattr(resource, constant):
+                raise ResourceLimitError(key + " is unavailable on this platform")
+        for key, constant, multiplier, default in settings:
+            value = limits.get(key, default)
+            if not value:
+                continue
+            limit = value * multiplier
+            try:
+                resource.setrlimit(getattr(resource, constant), (limit, limit))
+            except (AttributeError, ValueError, OSError, OverflowError) as error:
+                raise ResourceLimitError(key + ": " + str(error)) from error
+    except ResourceLimitError as error:
+        print("Argus: child resource setup failed: " + safe_text(error), file=sys.stderr, flush=True)
+        raise

@@ -1,48 +1,63 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "argus-shell"
-version = "1.0.0"
-description = "A security-focused Unix shell with audit logging, risk scoring, and suspicious activity detection"
+dynamic = ["version"]
+description = "A cross-platform programmable shell with policy analysis, audit tools, and optional protected execution"
 readme = "README.md"
-requires-python = ">=3.8"
-license = {text = "MIT"}
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["License.txt"]
 authors = [
     {name = "Argus Team"}
 ]
 keywords = ["shell", "security", "audit", "risk-scoring", "unix"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: POSIX",
+    "Operating System :: Microsoft :: Windows",
     "Operating System :: MacOS",
-    "Operating System :: POSIX :: BSD",
     "Environment :: Console",
     "Topic :: System :: Shells",
     "Topic :: Security",
 ]
-dependencies = []
+dependencies = [
+    "tree-sitter>=0.25,<0.27",
+    "tree-sitter-bash>=0.25,<0.26",
+    "prompt-toolkit>=3.0.48,<4",
+    "cryptography>=44",
+    "keyring>=25",
+    "psutil>=6.1",
+    "platformdirs>=4.3",
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=6.0", "pytest-cov>=2.10"]
+dev = ["build>=1.2", "pyinstaller>=6.12"]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/argus"
-Repository = "https://github.com/yourusername/argus.git"
-Documentation = "https://github.com/yourusername/argus#readme"
+Homepage = "https://github.com/prabal009/Argus-Shell"
+Repository = "https://github.com/prabal009/Argus-Shell.git"
+Documentation = "https://github.com/prabal009/Argus-Shell#readme"
 
 [project.scripts]
 argus = "argus.main:main"
+argus-broker = "argus.broker:main"
+argus-collector = "argus.collector:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["argus*"]
 
+[tool.setuptools.dynamic]
+version = {attr = "argus.__version__"}
+
 [tool.setuptools.package-data]
-argus = ["py.typed"]
+argus = ["locales/*.json"]
+
+[tool.setuptools.data-files]
+"share/argus/service" = ["service/*.py", "service/*.service", "service/*.socket", "service/*.timer", "service/*.json", "service/*.md"]

@@ -1,0 +1,20 @@
+{
+  "continuation": "… ",
+  "completion.command": "comando",
+  "completion.builtin": "integrado",
+  "completion.function": "función",
+  "completion.alias": "alias",
+  "completion.directory": "directorio",
+  "completion.file": "archivo",
+  "history.private": "Historial privado: {state}",
+  "history.usage": "Uso: history [show|search TEXTO|delete ÍNDICE|clear|merge|private [on|off]|ignore [add|remove PATRÓN]|limit [CANTIDAD]]",
+  "on": "activado",
+  "off": "desactivado",
+  "editor.private": "Historial privado",
+  "editor.help": "Tab: completar · Ctrl+R: historial · Alt+Intro: insertar nueva línea",
+  "startup.error": "No se puede leer el archivo de inicio {path}: {error}",
+  "interrupted": "Interrumpido",
+  "farewell": "¡Hasta luego!",
+  "welcome": "Argus — intérprete con políticas de seguridad",
+  "error": "Error: {message}"
+}

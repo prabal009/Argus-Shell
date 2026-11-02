@@ -1,0 +1,28 @@
+[Unit]
+Description=Argus mutually authenticated independent audit collector
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=@PYTHON@ -I -m argus.collector --policy /etc/argus/collector.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/argus-collector
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectControlGroups=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target
