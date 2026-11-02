@@ -121,6 +121,42 @@ class BackendTests(unittest.TestCase):
         self.assertFalse(marker.exists())
         self.assertEqual(jobs.jobs, {})
 
+    def test_invalid_readiness_identity_rolls_back_every_gated_stage(self):
+        real_popen, real_read_ready = subprocess.Popen, processes._read_ready
+        for identity in ('unrelated', 'nonce', 'duplicate'):
+            with self.subTest(identity=identity):
+                children, messages = [], []
+                marker = self.directory / ('released-' + identity)
+
+                def record_popen(*args, **kwargs):
+                    child = real_popen(*args, **kwargs)
+                    children.append(child)
+                    return child
+
+                def corrupt_ready(connection):
+                    ready = real_read_ready(connection)
+                    if identity == 'unrelated':
+                        ready['pid'] = os.getpid()
+                    elif identity == 'nonce':
+                        ready['token'] = 'not-the-private-nonce'
+                    elif messages:
+                        ready['pid'] = messages[0]['pid']
+                    messages.append(ready)
+                    return ready
+
+                command = self.python(f"from pathlib import Path;Path({str(marker)!r}).touch()")
+                errors = io.StringIO()
+                with patch.object(processes.subprocess, 'Popen', side_effect=record_popen), \
+                        patch.object(processes, '_read_ready', side_effect=corrupt_ready), \
+                        redirect_stderr(errors):
+                    self.assertEqual(self.run_commands([command, command]), 1)
+                self.assertIn('duplicate worker initialization' if identity == 'duplicate'
+                              else 'invalid worker initialization identity', errors.getvalue())
+                self.assertEqual(len(children), 2)
+                self.assertTrue(all(child.poll() is not None for child in children))
+                self.assertFalse(marker.exists())
+                self.assertEqual(jobs.jobs, {})
+
     def test_status_pipefail_and_command_environment(self):
         first = self.python('raise SystemExit(7)')
         last = self.python('import sys;sys.stdin.read()')

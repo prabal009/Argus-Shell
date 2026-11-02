@@ -4,7 +4,21 @@ A programmable Python shell with a Bash-grammar parser, native POSIX/Windows pro
 
 Requires **Python 3.11+** and the dependencies declared in `pyproject.toml`: tree-sitter/Bash grammar, prompt-toolkit, cryptography, keyring, psutil, and platformdirs. This is no longer a standard-library-only application.
 
+[![PyPI](https://img.shields.io/pypi/v/argus-shell)](https://pypi.org/project/argus-shell/)
+[![CI](https://github.com/prabal009/Argus-Shell/actions/workflows/ci.yml/badge.svg)](https://github.com/prabal009/Argus-Shell/actions)
+
 ## Install and run
+
+### From PyPI (recommended)
+
+Argus Shell is published on PyPI as [`argus-shell`](https://pypi.org/project/argus-shell/):
+
+```bash
+python -m pip install argus-shell
+argus
+```
+
+### From source
 
 Linux/macOS:
 
@@ -140,7 +154,7 @@ python packaging/verify_runtime.py
 python packaging/build_standalone.py --help
 ```
 
-CI/release configuration and standalone build scripts describe runnable checks/artifacts, not proof that all operating systems have passed or that a package has been published. Exact exercised results belong in `understand.md`. Matching PyPI publication and external release credentials must be established separately.
+CI/release configuration and standalone build scripts describe runnable checks/artifacts, not proof that all operating systems have passed or that a package has been published. Exact exercised results belong in `understand.md`. The package is published on PyPI as `argus-shell`; later releases are uploaded manually or via the gated release workflow.
 
 ## Changelog: 2.0
 

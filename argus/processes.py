@@ -320,14 +320,26 @@ class WindowsJob:
             self.handle = None
 
 
-def _worker_argv(payload):
+def _worker_argv(payload, environment):
     if getattr(sys, 'frozen', False):
         return [sys.executable, '--internal-worker', str(payload)]
+    executable = sys.executable
+    if os.name == 'nt':
+        # Match multiprocessing's Windows venv launch (bpo-35797). Scripts'
+        # python.exe is a redirector: Popen would own its PID/handle rather
+        # than the interpreter reporting readiness, and Job assignment could
+        # race the redirector's child creation. Launch the real interpreter
+        # directly while retaining the trusted venv's executable/site paths.
+        environment.pop('__PYVENV_LAUNCHER__', None)
+        base_executable = getattr(sys, '_base_executable', executable)
+        if os.path.normcase(base_executable) != os.path.normcase(executable):
+            environment['__PYVENV_LAUNCHER__'] = executable
+            executable = base_executable
     package_root = str(Path(__file__).resolve().parent.parent)
     bootstrap = ("import runpy,sys;sys.path.insert(0," + repr(package_root) + ");"
                  "sys.argv=['argus.worker',sys.argv[1]];"
                  "runpy.run_module('argus.worker',run_name='__main__')")
-    return [sys.executable, '-I', '-c', bootstrap, str(payload)]
+    return [executable, '-I', '-c', bootstrap, str(payload)]
 
 
 def _read_ready(connection):
@@ -447,7 +459,7 @@ def execute_pipeline(commands, background, runtime, *, audit_id=None, started=No
                     'builtin': not command.argv or main.is_builtin(command.argv, runtime),
                     'bypass_functions': bool(getattr(runtime, 'bypass_functions', False)),
                     'exec_requested': bool(getattr(runtime, 'exec_requested', False)),
-                    'control': {'port': listener.getsockname()[1], 'token': token},
+                    'control': {'port': listener.getsockname()[1], 'token': token + ':' + str(index)},
                 }
                 with os.fdopen(open_private(payload_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL),
                                'w', encoding='utf-8') as stream:
@@ -464,7 +476,7 @@ def execute_pipeline(commands, background, runtime, *, audit_id=None, started=No
                 else:
                     kwargs['process_group'] = pgid
                     kwargs['pass_fds'] = tuple(inherited)
-                child = subprocess.Popen(_worker_argv(payload_path), **kwargs)
+                child = subprocess.Popen(_worker_argv(payload_path, environment), **kwargs)
                 children.append(child)
                 if controller is not None:
                     controller.assign(child)
@@ -474,19 +486,23 @@ def execute_pipeline(commands, background, runtime, *, audit_id=None, started=No
                 for fd in pair:
                     os.close(fd)
             pipes.clear()
-            ready_pids = set()
-            while len(ready_pids) < len(children):
+            ready_tokens = set()
+            expected_tokens = {token + ':' + str(index) for index in range(len(children))}
+            while len(ready_tokens) < len(children):
                 connection, _ = listener.accept()
                 connections.append(connection)
                 connection.settimeout(30)
                 ready = _read_ready(connection)
-                if ready.get('token') != token or ready.get('pid') not in {child.pid for child in children}:
+                # Identity is the per-worker secret token, not the PID: on Windows a
+                # venv launcher may interpose a process so the reporting PID differs
+                # from the Popen handle's PID.
+                if ready.get('token') not in expected_tokens:
                     raise OSError('invalid worker initialization identity')
-                if ready['pid'] in ready_pids:
+                if ready['token'] in ready_tokens:
                     raise OSError('duplicate worker initialization')
                 if not ready.get('ok'):
                     raise OSError(ready.get('error', 'worker initialization failed'))
-                ready_pids.add(ready['pid'])
+                ready_tokens.add(ready['token'])
             description = ' | '.join(command.source or shlex.join(command.argv) for command in commands)
             hook = getattr(runtime, 'drain_traps', None)
             job_id = jobs.create_job(pgid, [child.pid for child in children], description,

@@ -195,6 +195,13 @@ class TerminalIntegrationTests(unittest.TestCase):
         self.screen = TerminalScreen(lambda data: os.write(self.master, data))
         self.addCleanup(self.cleanup)
         self.read_until(lambda: self.screen.at_prompt)
+        # The initial prompt can precede CPR handling and a startup redraw.
+        # Round-trip an edit before sending commands, without adding history.
+        probe = 'pty-handshake'
+        os.write(self.master, probe.encode())
+        self.read_until(lambda: self.screen.current_line == PROMPT + probe)
+        os.write(self.master, b'\x15')
+        self.read_until(lambda: self.screen.at_prompt)
         self.assertGreater(self.screen.cpr_requests, 0, 'PTY endpoint must answer real terminal cursor reports')
         self.assertNotIn('terminal does not support cursor position requests', self.screen.text.lower())
 
@@ -237,13 +244,17 @@ class TerminalIntegrationTests(unittest.TestCase):
                     return self.screen.text
         self.fail('PTY timed out or exited; rendered screen:\n' + self.screen.text)
 
-    def accept(self, keys):
-        newlines = self.screen.newlines
+    def accept(self, keys, *, completed):
         os.write(self.master, keys)
-        return self.read_until(lambda: self.screen.newlines > newlines and self.screen.at_prompt)
+        # Newlines and an empty prompt also occur during redraws. Require the
+        # operation's output or lifecycle change, not just renderer activity.
+        return self.read_until(lambda: self.screen.at_prompt and completed())
 
     def command(self, source):
-        return self.accept((source + '\r').encode())
+        record = (source, 'completed', 0)
+        previous = self.rows().count(record)
+        return self.accept((source + '\r').encode(),
+                           completed=lambda: self.rows().count(record) > previous)
 
     def wait_foreground_child(self, expected_pgid=None):
         deadline = time.monotonic() + 5
@@ -263,25 +274,29 @@ class TerminalIntegrationTests(unittest.TestCase):
         return [entry['text'] for entry in json.loads((self.home / 'state' / 'history.json').read_text())['entries']]
 
     def test_idle_completion_preserves_partially_edited_input(self):
-        self.command('sleep 0.5 &')
+        self.accept(b'sleep 0.5 &\r',
+                    completed=lambda: any(row[0] == 'sleep 0.5' for row in self.rows()))
         source = "printf 'preserved-line\\n'"
         os.write(self.master, source.encode())
         notification = self.read_until(lambda: 'Done sleep 0.5' in self.screen.text
                                        and self.screen.current_line == PROMPT + source)
         self.assertIn('Done sleep 0.5', notification)
         self.assertIn(('sleep 0.5', 'completed', 0), self.rows())
-        output = self.accept(b'\r')
+        output = self.accept(b'\r', completed=lambda: (source, 'completed', 0) in self.rows()
+                             and 'preserved-line' in self.screen.text.splitlines())
         self.assertIn('preserved-line', output.splitlines())
         self.assertIn((source, 'completed', 0), self.rows())
 
     def test_prompt_cancel_and_stop_resume_preserve_real_job_outcome(self):
         os.write(self.master, b'printf cancelled-input')
         self.read_until(lambda: self.screen.current_line == PROMPT + 'printf cancelled-input')
-        self.accept(b'\x03')
+        os.write(self.master, b'\x03')
+        self.read_until(lambda: self.screen.at_prompt)
         self.assertFalse(any('cancelled-input' in row[0] for row in self.rows()))
         os.write(self.master, b'sleep 10\r')
         pgid = self.wait_foreground_child()
-        stopped = self.accept(b'\x1a')
+        stopped = self.accept(b'\x1a',
+                              completed=lambda: ('sleep 10', 'stopped', None) in self.rows())
         number = re.search(r'\[(\d+)\] Stopped', stopped).group(1)
         self.assertIn(('sleep 10', 'stopped', None), self.rows())
         self.command('bg %' + number)
@@ -301,15 +316,18 @@ class TerminalIntegrationTests(unittest.TestCase):
 
     def test_real_tab_completion_multiline_history_and_private_mode(self):
         (self.home / 'space file').write_text('contents')
-        output = self.accept(b"printf '<%s>\\n' spa\t\r")
+        output = self.accept(b"printf '<%s>\\n' spa\t\r",
+                             completed=lambda: '<space file>' in self.screen.text.splitlines())
         self.assertIn('<space file>', output.splitlines())
         source = 'for word in first second; do\nprintf "%s\\n" "$word"\ndone'
-        output = self.accept((source.replace('\n', '\r') + '\r').encode())
+        output = self.accept((source.replace('\n', '\r') + '\r').encode(),
+                             completed=lambda: {'first', 'second'}.issubset(self.screen.text.splitlines()))
         self.assertIn('first', output.splitlines())
         self.assertIn('second', output.splitlines())
         self.assertIn(source, self.history())
         self.command("printf 'history-recalled\\n'")
-        self.accept(b'\x1b[A\r')
+        self.accept(b'\x1b[A\r',
+                    completed=lambda: self.rows().count(("printf 'history-recalled\\n'", 'completed', 0)) == 2)
         recalled = [row for row in self.rows() if row[0] == "printf 'history-recalled\\n'"]
         self.assertEqual(len(recalled), 2)
         self.command('history private on')
