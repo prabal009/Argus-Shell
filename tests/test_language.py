@@ -22,7 +22,7 @@ class LanguageTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.home = Path(temporary.name)
+        self.home = Path(temporary.name).resolve()
         environment = dict(os.environ, HOME=str(self.home),
                            XDG_CONFIG_HOME=str(self.home / 'config'),
                            XDG_STATE_HOME=str(self.home / 'state'),

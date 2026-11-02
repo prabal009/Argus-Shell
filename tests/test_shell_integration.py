@@ -4,7 +4,7 @@ from contextlib import closing
 REPO=pathlib.Path(__file__).resolve().parents[1]
 class ShellIntegrationTests(unittest.TestCase):
  def setUp(self):
-  self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=pathlib.Path(self.temp.name)
+  self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=pathlib.Path(self.temp.name).resolve()
   self.env=dict(os.environ,HOME=str(self.root),ARGUS_CONFIG_HOME=str(self.root/'config'),ARGUS_STATE_HOME=str(self.root/'state'),ARGUS_DATA_HOME=str(self.root/'data'),PYTHONPATH=str(REPO),NO_COLOR='1')
  def run_shell(self,source,*args):
   return subprocess.run([sys.executable,'-m','argus','--norc','--no-color','-c',source,*args],cwd=self.root,env=self.env,capture_output=True,text=True,timeout=30)

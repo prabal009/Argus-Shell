@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import signal
 import socket
+import subprocess
 import sys
 
 
@@ -167,11 +168,14 @@ def main(argv=None):
                 raise PermissionError(command.argv[0])
             raise FileNotFoundError(command.argv[0])
         if os.name == 'nt':
-            # The CRT spawn API propagates the descriptor table, including fd>2;
-            # subprocess's STARTUPINFO only propagates standard descriptors.
-            # The worker remains a job member while the native tool runs, so
-            # its exact exit code and all descendants remain owned by the job.
-            return os.spawnve(os.P_WAIT, executable, command.argv, environment)
+            # _wspawnve joins its argv entries with spaces without quoting.
+            # Encode each entry for the target's CRT parser before that join;
+            # never pass these shell-independent arguments through cmd.exe.
+            # Keep spawnve rather than Popen: the CRT also transfers fd>2.
+            # P_WAIT keeps this worker in its assigned Job Object until the
+            # native child exits, preserving status and descendant ownership.
+            arguments = [subprocess.list2cmdline([argument]) for argument in command.argv]
+            return os.spawnve(os.P_WAIT, executable, arguments, environment)
         os.execve(executable, command.argv, environment)
     except SystemExit as error:
         status = error.code if isinstance(error.code, int) else (0 if error.code is None else 1)

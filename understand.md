@@ -111,7 +111,7 @@ Commands below are built-ins or shell forms; installed external programs remain 
 | `source FILE [ARG ...]`, `. FILE [ARG ...]` | Evaluate a file in current shell state; source-local positional arguments are restored afterward. |
 | `read [OPTIONS] NAME ...` | Read into shell variables, including redirected/heredoc input. |
 | `umask [MASK]` | Inspect/change creation mask; OS semantics apply. |
-| `exec [COMMAND ARG ...]` | Replace the shell with an authorized executable. With no command, apply supplied redirections persistently. Audit records replacement rather than inventing a later exit result. |
+| `exec [COMMAND ARG ...]` | Run an authorized replacement and stop evaluating the original shell. POSIX uses a same-PID overlay; Windows supervises spawn/wait/exit in a Job Object and preserves the real exit status. With no command, apply supplied redirections persistently. |
 | `type NAME ...`, `command [-v\|-V] NAME ...` | Classify names or invoke while bypassing function lookup. |
 | `alias [NAME=SOURCE ...]`, `unalias NAME ...` | Define/list/remove syntax aliases; alias expansion is bounded against recursion. |
 | `pushd [DIR]`, `popd`, `dirs` | Manage the directory stack. |
@@ -244,13 +244,17 @@ Cross-platform CI exposed additional portability defects. Windows private direct
 
 The interactive package smoke continues servicing PTY output and cursor reports during shutdown, including while terminal restoration drains pending output. It checks successful and nonzero interactive exit statuses and reports terminal diagnostics on failure; it does not skip the macOS PTY test or relax its deadline.
 
+Native Windows arguments are quoted for the target CRT after Argus has parsed them; spaces, quotes, empty arguments and backslashes must not change argument boundaries. No `cmd.exe` reparsing is involved. Windows `exec` uses supervised spawn/wait/exit, not a same-PID Unix overlay; supervising processes remain alive and count toward aggregate process limits. Replacement does not run the original shell's EXIT trap or following commands.
+
+Job tracking recognizes Darwin's continued-status encoding before stopped status and uses positive live OS process-state evidence to reconcile missing or stale reports, never disappearance as proof of success. Real PTY stop/resume checks wait for an accepted `fg` command and the original child process group before interrupting. Test temporary directories are canonicalized so macOS `/var` aliases do not falsely contradict the physical cwd.
+
 ## 7. Verification and still-left work
 
 The results below were exercised on Linux. An implementation or workflow existing in the repository is not a claim of successful execution on every target.
 
 Recorded Linux verification for this implementation:
 
-- The final integrated local run executed **234 tests: 225 passed, 9 platform-specific cases skipped**, with resource warnings treated as errors. Native Windows/macOS results must be checked on their actual CI runners.
+- The final integrated local run executed **246 tests: 228 passed, 18 platform-specific cases skipped**, with resource warnings treated as errors. Native Windows/macOS results must be checked on their actual CI runners.
 - The installed application's eight runtime scenarios passed, including actual PTY input with exit statuses 0 and 7, workers, pipelines, scripts/source, exported-variable boundaries and exit status.
 - Fresh virtual environments independently installed the wheel and source distribution; each passed the same eight runtime scenarios from outside the checkout.
 - Both PyInstaller **onefile** and **onedir** Linux builds completed, and each executable passed all eight runtime scenarios, including its internal frozen-worker path.

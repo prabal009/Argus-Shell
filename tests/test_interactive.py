@@ -34,7 +34,7 @@ class InteractiveTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.home = Path(self.temporary.name)
+        self.home = Path(self.temporary.name).resolve()
         self.previous_directory = Path.cwd()
         os.chdir(self.home)
         self.addCleanup(os.chdir, self.previous_directory)

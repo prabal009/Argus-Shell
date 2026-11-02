@@ -291,7 +291,8 @@ def execute_pipeline(commands, background, runtime):
                         runtime.persistent_fds = original_fds
             _install_traps(runtime)
         else:
-            if runtime.exec_requested and len(commands) == 1 and not background:
+            if (runtime.exec_requested and len(commands) == 1 and not background
+                    and os.name != 'nt'):
                 sys.stdout.flush()
                 sys.stderr.flush()
                 processes.apply_redirections(command.redirections, noclobber=runtime.state.options.get('noclobber', False))
@@ -313,6 +314,13 @@ def execute_pipeline(commands, background, runtime):
                     outcomes = [job['processes'][pid]['status'] or 0 for pid in job['pids']]
                     status = next((value for value in reversed(outcomes) if value), 0)
                     update_audit(audit_id, exit_status=status, duration_ms=(time.monotonic()-started)*1000)
+            if runtime.exec_requested and len(commands) == 1 and not background:
+                # Windows has no Unix process overlay. Use the same gated,
+                # Job Object-owned worker as ordinary external commands, wait
+                # for its real status, then terminate this shell/worker. CRT
+                # exec would orphan the replacement and report false success.
+                runtime.state.traps.pop('EXIT', None)
+                raise SystemExit(status)
         return 0 if status is None else int(status)
     except SystemExit as error:
         status = int(error.code or 0)

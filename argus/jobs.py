@@ -249,6 +249,21 @@ def terminate_tree(pid):
             pass
 
 
+def _process_status(pid):
+    """Observe liveness without inventing an exit status or consuming waitpid."""
+    try:
+        return psutil.Process(pid).status()
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return None
+
+
+def _is_active_status(status):
+    return status in (psutil.STATUS_RUNNING, psutil.STATUS_SLEEPING,
+                      psutil.STATUS_DISK_SLEEP, psutil.STATUS_IDLE,
+                      psutil.STATUS_WAKING, psutil.STATUS_WAITING,
+                      psutil.STATUS_LOCKED, psutil.STATUS_PARKED)
+
+
 def _signal_job(job, signum):
     descendants = _tree_processes(job)
     delivered = False
@@ -333,7 +348,17 @@ def _record_wait(job_id, job, pid, status):
         process.update(state="exited", status=os.WEXITSTATUS(status))
     elif os.WIFSIGNALED(status):
         process.update(state="exited", status=128 + os.WTERMSIG(status))
+    elif hasattr(os, "WIFCONTINUED") and os.WIFCONTINUED(status):
+        process.update(state="running", stop_signal=None)
+        job["stop_requested"] = False
     elif os.WIFSTOPPED(status):
+        # A stop report can predate an external SIGCONT. Check the current
+        # process state before propagating a stale stop to the entire job.
+        if _is_active_status(_process_status(pid)):
+            process.update(state="running", stop_signal=None)
+            job["stop_requested"] = False
+            _refresh_job(job_id, job)
+            return
         process.update(state="stopped", stop_signal=os.WSTOPSIG(status))
         # A pipeline is one job: stop siblings as well, and wait for their
         # actual stop/exit events before returning the terminal to the prompt.
@@ -345,10 +370,6 @@ def _record_wait(job_id, job, pid, status):
                 pass
             except OSError as exc:
                 _error(f"cannot stop job %{job_id}: {exc}")
-    elif hasattr(os, "WIFCONTINUED") and os.WIFCONTINUED(status):
-        process["state"] = "running"
-        process["stop_signal"] = None
-        job["stop_requested"] = False
     _refresh_job(job_id, job)
 
 
@@ -413,6 +434,13 @@ def update_jobs():
                 handle = job["handles"].get(pid)
                 if handle is not None and process["state"] == "exited":
                     handle.returncode = os.waitstatus_to_exitcode(status)
+            if process["state"] == "stopped" and _is_active_status(_process_status(pid)):
+                # Some POSIX waitpid implementations do not report resumes.
+                # Only an observed active state proves an external SIGCONT;
+                # disappearance/zombie status still requires the real wait.
+                process.update(state="running", stop_signal=None)
+                job["stop_requested"] = False
+                _refresh_job(job_id, job)
         if job["status"] == "done":
             if not job["disowned"]:
                 finished_jobs.append(job_id)

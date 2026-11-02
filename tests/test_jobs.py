@@ -22,6 +22,14 @@ def stopped(signum=getattr(signal, "SIGTSTP", 19)):
     return (signum << 8) | 0x7f
 
 
+def continued():
+    """Use the host's wait encoding (Darwin does not use Linux's 0xffff)."""
+    for status in (0xffff, stopped(signal.SIGCONT)):
+        if os.WIFCONTINUED(status):
+            return status
+    raise AssertionError("no continued wait status for this POSIX host")
+
+
 class JobStateFixture(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
@@ -113,7 +121,7 @@ class JobsTests(JobStateFixture):
             self.assertNotIn("exit_status", call.kwargs)
         with redirect_stdout(io.StringIO()):
             self.assertEqual(job_control.background_job(job_id), 0)
-        with self.pending({2401: [0xffff, exited(2)], 2402: [0xffff, exited(11)]}):
+        with self.pending({2401: [continued(), exited(2)], 2402: [continued(), exited(11)]}):
             self.assertEqual(job_control.update_jobs(), [job_id])
         self.assertEqual(job["last_status"], 11)
         self.assertTrue(job["audited"])
@@ -122,10 +130,67 @@ class JobsTests(JobStateFixture):
 
     def test_external_continue_changes_stopped_state(self):
         job_id = job_control.create_job(2501, [2501], "sleep", status="stopped", audit_id=55)
-        with self.pending({2501: [0xffff]}):
+        with self.pending({2501: [continued()]}):
             job_control.update_jobs()
         self.assertEqual(job_control.jobs[job_id]["status"], "running")
         self.assertEqual(self.audit.call_args.kwargs["state"], "running")
+
+    def test_external_continue_without_wait_event_requires_active_os_state(self):
+        job_id = job_control.create_job(2511, [2511], "sleep", status="stopped", audit_id=56)
+        job = job_control.jobs[job_id]
+        job["stop_requested"] = True
+        for status in (job_control.psutil.STATUS_STOPPED, job_control.psutil.STATUS_TRACING_STOP,
+                       job_control.psutil.STATUS_ZOMBIE, job_control.psutil.STATUS_DEAD, None, "?"):
+            with self.subTest(status=status), self.pending({}), \
+                 patch.object(job_control, "_process_status", return_value=status):
+                self.assertEqual(job_control.update_jobs(), [])
+            self.assertEqual(job["status"], "stopped")
+            self.assertIsNone(job["processes"][2511]["status"])
+        with self.pending({}), patch.object(job_control, "_process_status",
+                                          return_value=job_control.psutil.STATUS_SLEEPING):
+            self.assertEqual(job_control.update_jobs(), [])
+            self.assertEqual(job_control.update_jobs(), [])
+        self.assertEqual(job["status"], "running")
+        self.assertFalse(job["stop_requested"])
+        self.assertEqual([call.kwargs["state"] for call in self.audit.call_args_list],
+                         ["stopped", "running"])
+        self.killpg.assert_not_called()
+        with self.pending({2511: [exited(9)]}):
+            self.assertEqual(job_control.update_jobs(), [job_id])
+        self.assertEqual(job["last_status"], 9)
+        self.assertEqual(self.audit.call_args.kwargs["exit_status"], 9)
+
+    def test_unavailable_process_status_is_not_resume_evidence(self):
+        job_id = job_control.create_job(2521, [2521], "sleep", status="stopped", audit_id=57)
+        for error in (job_control.psutil.NoSuchProcess(2521), job_control.psutil.AccessDenied(2521)):
+            with self.subTest(error=error), self.pending({}), \
+                 patch.object(job_control.psutil, "Process", side_effect=error):
+                self.assertEqual(job_control.update_jobs(), [])
+            self.assertEqual(job_control.jobs[job_id]["status"], "stopped")
+        self.assertEqual([call.kwargs["state"] for call in self.audit.call_args_list], ["stopped"])
+
+    def test_stale_stop_after_continue_does_not_stop_running_pipeline(self):
+        job_id = job_control.create_job(2531, [2531, 2532], "a | b", status="stopped", audit_id=58)
+        job = job_control.jobs[job_id]
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(job_control.background_job(job_id), 0)
+        self.killpg.assert_called_once_with(2531, signal.SIGCONT)
+        with self.pending({2531: [stopped(signal.SIGSTOP)]}), \
+             patch.object(job_control, "_process_status", return_value=job_control.psutil.STATUS_RUNNING):
+            self.assertEqual(job_control.update_jobs(), [])
+        self.assertEqual(job["status"], "running")
+        self.assertTrue(all(process["state"] == "running" for process in job["processes"].values()))
+        self.killpg.assert_called_once_with(2531, signal.SIGCONT)
+        self.assertEqual([call.kwargs["state"] for call in self.audit.call_args_list],
+                         ["stopped", "running"])
+        # A real later stop must still suspend the whole process group.
+        with self.pending({2531: [stopped()], 2532: [stopped(signal.SIGSTOP)]}), \
+             patch.object(job_control, "_process_status", return_value=job_control.psutil.STATUS_STOPPED):
+            self.assertEqual(job_control.update_jobs(), [])
+        self.assertEqual(job["status"], "stopped")
+        self.assertEqual(self.killpg.call_args.args, (2531, signal.SIGSTOP))
+        self.assertEqual([call.kwargs["state"] for call in self.audit.call_args_list],
+                         ["stopped", "running", "stopped"])
 
     def test_foreground_resume_hands_off_before_continuing(self):
         job_id = job_control.create_job(2601, [2601], "sleep", status="stopped",

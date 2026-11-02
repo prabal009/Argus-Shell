@@ -245,11 +245,12 @@ class TerminalIntegrationTests(unittest.TestCase):
     def command(self, source):
         return self.accept((source + '\r').encode())
 
-    def wait_foreground_child(self):
+    def wait_foreground_child(self, expected_pgid=None):
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            if os.tcgetpgrp(self.master) != self.pid:
-                return
+            pgid = os.tcgetpgrp(self.master)
+            if pgid > 0 and pgid != self.pid and (expected_pgid is None or pgid == expected_pgid):
+                return pgid
             time.sleep(.01)
         self.fail('child did not receive terminal ownership')
 
@@ -279,14 +280,22 @@ class TerminalIntegrationTests(unittest.TestCase):
         self.accept(b'\x03')
         self.assertFalse(any('cancelled-input' in row[0] for row in self.rows()))
         os.write(self.master, b'sleep 10\r')
-        self.wait_foreground_child()
+        pgid = self.wait_foreground_child()
         stopped = self.accept(b'\x1a')
         number = re.search(r'\[(\d+)\] Stopped', stopped).group(1)
         self.assertIn(('sleep 10', 'stopped', None), self.rows())
         self.command('bg %' + number)
-        os.write(self.master, ('fg %' + number + '\r').encode())
-        self.wait_foreground_child()
-        self.accept(b'\x03')
+        foreground = 'fg %' + number
+        newlines = self.screen.newlines
+        os.write(self.master, (foreground + '\r').encode())
+        # Reading the accepted line prevents a stale PTY group observation from
+        # sending Ctrl-C before the editor has submitted the foreground command.
+        self.read_until(lambda: self.screen.newlines > newlines
+                        and PROMPT + foreground in self.screen.text)
+        self.wait_foreground_child(pgid)
+        os.write(self.master, b'\x03')
+        self.read_until(lambda: self.screen.at_prompt
+                        and ('sleep 10', 'completed', 130) in self.rows())
         matching = [row for row in self.rows() if row[0] == 'sleep 10']
         self.assertEqual(matching, [('sleep 10', 'completed', 130)])
 
